@@ -5,7 +5,7 @@ use Apache::ModuleConfig ();
 use Apache::Constants qw(DECLINE_CMD OK DECLINED);
 use DynaLoader ();
 
-$Apache::PerlVINC::VERSION = '0.02';
+$Apache::PerlVINC::VERSION = '0.03';
 
 
 if($ENV{MOD_PERL}) 
@@ -34,22 +34,19 @@ sub PerlVersion ($$@)
 }
 
 
+
 sub handler 
 {
   my $r = shift;
   my $cfg = Apache::ModuleConfig->get($r, __PACKAGE__);
 
-  
   if ($r->current_callback() eq "PerlCleanupHandler") 
   {
-    # do clean up
     map { delete $INC{$_} } keys %{$cfg->{Files}};
     return OK;
   }
-  
-  
-  # comment following line to have your requests see @INC
-  local @INC; # dont mess with @main::INC. 
+   
+  local @INC = @INC;
   unshift @INC, @{ $cfg->{'VINC'} };
   for (keys %{ $cfg->{'Files'} }) 
   {
@@ -69,7 +66,7 @@ sub handler
 sub DIR_CREATE
 {
   my $self = shift->new();
-  $self->{VINC} ||= []; #build @INC into here
+  $self->{VINC} ||= [];
   $self->{Files} ||= {};
   return $self;
 }
@@ -79,17 +76,15 @@ sub DIR_MERGE
 {
   my ($prt, $kid) = @_;
 
-  my $new = {};
+  my %new = (%$prt, %$kid);
 
-  # dont let kid overwrite with a blank value
-  $new->{INC} = $kid->{INC} || $prt->{INC};
-  # merge files to be reloaded
-  %{ $new->{Files} } = (%{$prt->{Files}}, %{$kid->{Files}});
+  $new{INC} = $prt->{INC} if $kid->{INC} eq "";
+  %{$new{Files}} = (%{$prt->{Files}}, %{$kid->{Files}});
 
-  # INC array gets built here.
-  @{$new->{VINC}} = ($prt->{INC}, $kid->{INC});
+  # INC paths get built here
+  @{$new{VINC}} = ($prt->{INC}, $kid->{INC});
 
-  return bless $new, ;
+  return bless \%new, ;
 }
 
 
@@ -112,11 +107,9 @@ __END__
 
   # set the include path
   PerlINC /home/dave/site/files/modules
-
   # make sure VINC reloads the modules
   PerlFixupHandler Apache::PerlVINC
-
-  # optionally have VINC unload versioned modules
+  # aptionally have VINC unload versioned modules
   PerlCleanupHandler Apache::PerlVINC
 
 
@@ -170,10 +163,11 @@ development environment, not a mission critical one.
 =item PerlINC
 
 Takes only one argument: the path to be prepended to C<@INC>. In v0.1, this was 
-stored internally as an array. This is no longer the case. However, it still works
-as expected in that subsequent calls to C<PerlINC> will not overwrite the previous
-ones. They will both be prepended to C<@INC>. Note that C<@INC> is not changed for 
-the entire request, so dont count on that path being in the C<@INC> for your scripts.
+stored internally as an array. This is no longer the case. However, it still works 
+somewhat as expected in that subsequent calls to C<PerlINC> will not overwrite the 
+previous ones, provided they are not in the same config section (see BUGS). They will 
+both be prepended to C<@INC>. Note that C<@INC> is not changed for the entire request, 
+so dont count on that path being in C<@INC> for your scripts.
 
 =item PerlVersion
 
@@ -181,25 +175,40 @@ This directives specifies the files you want reloaded. Depending on where this
 directive sits, files will be loaded (and perhaps unloaded). Ie. if this sits in 
 a C<Location> section, the files will only be reloaded on requests to that location.
 If this lies in a server section, all requests to the server or v-host will have 
-these files reloaded. Again, this directive does not overwrite itself.
+these files reloaded. 
 
 =back
 
-=head1 BUGS
+=head1 BUGS AND LIMITATIONS
 
-Sometimes, the server wont start and returns no errors. If you run with C<gdb>
-you will see an error in C<ap_remove_module>. This happens with mod_perl 1.24
-and maybe versions before that. The latest version of Apache::ExtUtils (v1.04) 
-solves this problem by adding a call to ap_remove_module in the C<END> routine.
+Under some setups, C<PerlModule>'ing PerlVINC will cause the server to silently 
+crash on startup. Upgrading C<Apache::ExtUtils> to v/1.04 might fix the problem. As
+of this writing, the current version of mod_perl (1.24) does not contain this version
+of C<Apache::ExtUtils>. Until the next version is released, you will have to obtain
+it from the latest cvs snapshot.
+
+If the C<PerlINC> directive is used twice in the same config section, the first call 
+will be overwritten. Ie.
+
+  PerlINC /qwe
+  PerlINC /poi
+ 
+  <Location /asdf/>
+    PerlINC /zxc
+  </Location>
+
+For requests outside of /asdf/, @INC will contain /poi. Inside /asdf/ @INC will 
+contain /zxc and /poi. This is kinda sucky, I know, and I hope to fix for the next 
+release.
 
 =head1 AUTHORS
 
-  Doug MacEachern <dougm@pobox.com>
-  Dave Moore <dave@epals.com>
+ Doug MacEachern <dougm@pobox.com>
+ Dave Moore <dave@epals.com>
 
 =head1 COPYRIGHT
 
-This library is free software; you can redistribute it and/or
+This library is free software. You can redistribute it and/or
 modify it under the same terms as Perl itself.
 
 =cut

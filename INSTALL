@@ -1,6 +1,7 @@
-duh.
-
-perl Makefile.PL
+perl Makefile.pl
 make
 make install
+
+
+duh.
 
